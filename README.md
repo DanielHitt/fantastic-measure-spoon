@@ -63,6 +63,13 @@ npm run build           # builds client, compiles server
 npm start               # serves the built app + API on http://localhost:4000
 ```
 
+### Hosting it online (free)
+
+Local runs on a zero-config SQLite file. To host it (reachable from any computer
+and drivers' phones), point `DATABASE_URL` at a free Postgres (Supabase) and deploy
+to a free host — the app switches database engines automatically. Step-by-step
+guide: **[DEPLOY.md](DEPLOY.md)**.
+
 ---
 
 ## Google Maps (optional, recommended for production)

@@ -1,4 +1,4 @@
-import { db } from './db.js';
+import { getDb } from './db.js';
 import { CITY_COORDS, cityFromText } from './cityCoords.js';
 import type { LatLng } from './types.js';
 
@@ -9,10 +9,12 @@ import type { LatLng } from './types.js';
  *  3. WA city centroid + deterministic jitter (always works, no network)
  */
 export async function geocode(address: string, hintCity?: string): Promise<LatLng & { source: string }> {
+  const db = await getDb();
   const key = address.trim().toLowerCase();
-  const cached = db
-    .prepare('SELECT lat, lng, source FROM geocode_cache WHERE query = ?')
-    .get(key) as { lat: number; lng: number; source: string } | undefined;
+  const cached = (await db.get(
+    'SELECT lat, lng, source FROM geocode_cache WHERE query = ?',
+    [key],
+  )) as { lat: number; lng: number; source: string } | undefined;
   if (cached) return { lat: cached.lat, lng: cached.lng, source: cached.source };
 
   let result: (LatLng & { source: string }) | null = null;
@@ -41,11 +43,10 @@ export async function geocode(address: string, hintCity?: string): Promise<LatLn
     result = { lat: round(base[0] + dy), lng: round(base[1] + dx), source: 'city-estimate' };
   }
 
-  db.prepare('INSERT OR REPLACE INTO geocode_cache (query, lat, lng, source) VALUES (?,?,?,?)').run(
-    key,
-    result.lat,
-    result.lng,
-    result.source,
+  await db.run(
+    `INSERT INTO geocode_cache (query, lat, lng, source) VALUES (?,?,?,?)
+     ON CONFLICT (query) DO UPDATE SET lat = excluded.lat, lng = excluded.lng, source = excluded.source`,
+    [key, result.lat, result.lng, result.source],
   );
   return result;
 }

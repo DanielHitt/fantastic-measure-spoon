@@ -1,0 +1,19 @@
+# Render Blueprint — one free web service that serves the API + the built app.
+# Pair it with a free Supabase Postgres database (set DATABASE_URL below).
+# Deploy: push to GitHub, then on render.com "New +" -> "Blueprint" -> pick this repo.
+services:
+  - type: web
+    name: dee-field-scheduler
+    runtime: node
+    plan: free
+    branch: claude/laughing-ride-yxklg5
+    buildCommand: npm run install:all && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: DATABASE_URL
+        sync: false # paste your Supabase connection string in the dashboard
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false # optional — live traffic-aware drive times
+      - key: NODE_VERSION
+        value: 22.11.0

@@ -1,14 +1,18 @@
 import { Router } from 'express';
-import { db } from '../db.js';
+import { getDb } from '../db.js';
 import { optimizeRoute, type OptStop } from '../routing/optimize.js';
 
 export const routeRouter = Router();
 
 const OFFICE_FALLBACK = { name: 'Dee Inc — Monroe Office', lat: 47.8554, lng: -121.9715 };
 
-function startLocationFor(employeeId: number | null) {
+async function startLocationFor(employeeId: number | null) {
+  const db = await getDb();
   if (employeeId) {
-    const e = db.prepare('SELECT name, home_address, home_lat, home_lng, work_start FROM employees WHERE id = ?').get(employeeId) as any;
+    const e = (await db.get(
+      'SELECT name, home_address, home_lat, home_lng, work_start FROM employees WHERE id = ?',
+      [employeeId],
+    )) as any;
     if (e?.home_lat != null) {
       return {
         loc: { name: e.home_address || OFFICE_FALLBACK.name, lat: e.home_lat, lng: e.home_lng },
@@ -19,19 +23,18 @@ function startLocationFor(employeeId: number | null) {
   return { loc: OFFICE_FALLBACK, workStart: '07:30' };
 }
 
-function stopsFromJobs(jobIds: number[]): OptStop[] {
+async function stopsFromJobs(jobIds: number[]): Promise<OptStop[]> {
   if (!jobIds.length) return [];
+  const db = await getDb();
   const placeholders = jobIds.map(() => '?').join(',');
-  const rows = db
-    .prepare(
-      `SELECT j.id, j.project_id, j.unit, j.scope_code, j.est_minutes, j.priority,
-              j.time_window_start, j.time_window_end, p.name AS project_name, p.lat, p.lng
-       FROM jobs j JOIN projects p ON p.id = j.project_id
-       WHERE j.id IN (${placeholders})`,
-    )
-    .all(...jobIds) as any[];
+  const rows = (await db.query(
+    `SELECT j.id, j.project_id, j.unit, j.scope_code, j.est_minutes, j.priority,
+            j.time_window_start, j.time_window_end, p.name AS project_name, p.lat, p.lng
+     FROM jobs j JOIN projects p ON p.id = j.project_id
+     WHERE j.id IN (${placeholders})`,
+    jobIds,
+  )) as any[];
   const byId = new Map(rows.map((r) => [r.id, r]));
-  // preserve caller order
   return jobIds
     .map((id) => byId.get(id))
     .filter(Boolean)
@@ -56,26 +59,26 @@ function buildStartTime(date: string, hhmm: string): Date {
 
 // Optimize (or just sequence) a tech's day
 routeRouter.post('/route/optimize', async (req, res) => {
+  const db = await getDb();
   const employeeId: number | null = req.body.employeeId ?? null;
   const date: string = req.body.date;
   if (!date) return res.status(400).json({ error: 'date required' });
 
-  const jobRows = db
-    .prepare(
-      `SELECT id FROM jobs
-       WHERE scheduled_date = ? AND ${employeeId ? 'employee_id = ?' : 'employee_id IS NULL'}
-         AND status NOT IN ('completed')
-       ORDER BY COALESCE(sequence, 999), id`,
-    )
-    .all(...(employeeId ? [date, employeeId] : [date])) as { id: number }[];
+  const jobRows = (await db.query(
+    `SELECT id FROM jobs
+     WHERE scheduled_date = ? AND ${employeeId ? 'employee_id = ?' : 'employee_id IS NULL'}
+       AND status NOT IN ('completed')
+     ORDER BY COALESCE(sequence, 999), id`,
+    employeeId ? [date, employeeId] : [date],
+  )) as { id: number }[];
 
-  const { loc, workStart } = startLocationFor(employeeId);
+  const { loc, workStart } = await startLocationFor(employeeId);
   const startTime = buildStartTime(date, req.body.startTime ?? workStart);
 
   const plan = await optimizeRoute({
     start: loc,
     startTime,
-    stops: stopsFromJobs(jobRows.map((j) => j.id)),
+    stops: await stopsFromJobs(jobRows.map((j) => j.id)),
     returnToStart: req.body.returnToStart ?? true,
     lockOrder: req.body.lockOrder ?? false,
     workdayMinutes: req.body.workdayMinutes ?? 9 * 60,
@@ -83,9 +86,9 @@ routeRouter.post('/route/optimize', async (req, res) => {
   plan.employeeId = employeeId;
 
   if (req.body.save) {
-    const upd = db.prepare('UPDATE jobs SET sequence = ? WHERE id = ?');
-    const tx = db.transaction(() => plan.stops.forEach((s) => upd.run(s.sequence, s.jobId)));
-    tx();
+    await db.tx(async (q) => {
+      for (const s of plan.stops) await q.run('UPDATE jobs SET sequence = ? WHERE id = ?', [s.sequence, s.jobId]);
+    });
   }
 
   res.json(plan);
@@ -96,11 +99,11 @@ routeRouter.post('/route/preview', async (req, res) => {
   const jobIds: number[] = req.body.jobIds ?? [];
   const date: string = req.body.date ?? new Date().toISOString().slice(0, 10);
   const employeeId: number | null = req.body.employeeId ?? null;
-  const { loc, workStart } = startLocationFor(employeeId);
+  const { loc, workStart } = await startLocationFor(employeeId);
   const plan = await optimizeRoute({
     start: loc,
     startTime: buildStartTime(date, req.body.startTime ?? workStart),
-    stops: stopsFromJobs(jobIds),
+    stops: await stopsFromJobs(jobIds),
     returnToStart: req.body.returnToStart ?? true,
     lockOrder: req.body.lockOrder ?? false,
   });
@@ -109,36 +112,34 @@ routeRouter.post('/route/preview', async (req, res) => {
 });
 
 // Weekly board: days × techs + unassigned backlog
-routeRouter.get('/schedule/week', (req, res) => {
-  const start = (req.query.start as string) || defaultWeekStart();
+routeRouter.get('/schedule/week', async (req, res) => {
+  const db = await getDb();
+  const start = (req.query.start as string) || (await defaultWeekStart());
   const days = Array.from({ length: 5 }, (_, i) => addDays(start, i));
   const end = days[days.length - 1];
 
-  const jobs = db
-    .prepare(
-      `SELECT j.id, j.project_id, j.employee_id, j.unit, j.scope_code, j.status,
-              j.scheduled_date, j.est_minutes, j.sequence, j.priority,
-              p.name AS project_name, p.city, p.lat, p.lng,
-              s.label AS scope_label,
-              (SELECT completion_status FROM time_logs t WHERE t.job_id = j.id ORDER BY t.id DESC LIMIT 1) AS completion_status,
-              (SELECT actual_minutes FROM time_logs t WHERE t.job_id = j.id ORDER BY t.id DESC LIMIT 1) AS actual_minutes
-       FROM jobs j JOIN projects p ON p.id = j.project_id
-       LEFT JOIN scopes s ON s.code = j.scope_code
-       WHERE j.scheduled_date BETWEEN ? AND ?
-       ORDER BY j.scheduled_date, COALESCE(j.sequence, 999), j.id`,
-    )
-    .all(start, end);
+  const jobs = await db.query(
+    `SELECT j.id, j.project_id, j.employee_id, j.unit, j.scope_code, j.status,
+            j.scheduled_date, j.est_minutes, j.sequence, j.priority,
+            p.name AS project_name, p.city, p.lat, p.lng,
+            s.label AS scope_label,
+            (SELECT completion_status FROM time_logs t WHERE t.job_id = j.id ORDER BY t.id DESC LIMIT 1) AS completion_status,
+            (SELECT actual_minutes FROM time_logs t WHERE t.job_id = j.id ORDER BY t.id DESC LIMIT 1) AS actual_minutes
+     FROM jobs j JOIN projects p ON p.id = j.project_id
+     LEFT JOIN scopes s ON s.code = j.scope_code
+     WHERE j.scheduled_date BETWEEN ? AND ?
+     ORDER BY j.scheduled_date, COALESCE(j.sequence, 999), j.id`,
+    [start, end],
+  );
 
-  const unassigned = db
-    .prepare(
-      `SELECT j.id, j.project_id, j.unit, j.scope_code, j.status, j.est_minutes, j.priority,
-              p.name AS project_name, p.city, p.lat, p.lng, s.label AS scope_label
-       FROM jobs j JOIN projects p ON p.id = j.project_id
-       LEFT JOIN scopes s ON s.code = j.scope_code
-       WHERE j.status = 'unscheduled'
-       ORDER BY j.priority DESC, p.name LIMIT 200`,
-    )
-    .all();
+  const unassigned = await db.query(
+    `SELECT j.id, j.project_id, j.unit, j.scope_code, j.status, j.est_minutes, j.priority,
+            p.name AS project_name, p.city, p.lat, p.lng, s.label AS scope_label
+     FROM jobs j JOIN projects p ON p.id = j.project_id
+     LEFT JOIN scopes s ON s.code = j.scope_code
+     WHERE j.status = 'unscheduled'
+     ORDER BY j.priority DESC, p.name LIMIT 200`,
+  );
 
   res.json({ start, days, jobs, unassigned });
 });
@@ -150,16 +151,16 @@ function mondayOf(d: Date): string {
   return x.toISOString().slice(0, 10);
 }
 /** Soonest week (Monday) that has scheduled jobs on/after today; else this week. */
-function defaultWeekStart(): string {
+async function defaultWeekStart(): Promise<string> {
+  const db = await getDb();
   const today = new Date().toISOString().slice(0, 10);
-  const row = db
-    .prepare(
-      `SELECT MIN(scheduled_date) d FROM jobs WHERE scheduled_date >= ? AND status != 'completed'`,
-    )
-    .get(today) as { d: string | null };
+  const row = (await db.get(
+    `SELECT MIN(scheduled_date) d FROM jobs WHERE scheduled_date >= ? AND status != 'completed'`,
+    [today],
+  )) as { d: string | null };
   const anchor = row?.d
     ? row.d
-    : ((db.prepare(`SELECT MAX(scheduled_date) d FROM jobs`).get() as { d: string | null }).d ?? today);
+    : ((((await db.get(`SELECT MAX(scheduled_date) d FROM jobs`)) as { d: string | null }) ?? {}).d ?? today);
   return mondayOf(new Date(anchor + 'T00:00:00'));
 }
 function addDays(iso: string, n: number): string {

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { db } from '../db.js';
+import { getDb } from '../db.js';
 
 export const jobsRouter = Router();
 
@@ -20,7 +20,8 @@ const JOB_SELECT = `
 `;
 
 // List jobs with filters
-jobsRouter.get('/jobs', (req, res) => {
+jobsRouter.get('/jobs', async (req, res) => {
+  const db = await getDb();
   const where: string[] = [];
   const params: any[] = [];
   if (req.query.date) {
@@ -50,40 +51,39 @@ jobsRouter.get('/jobs', (req, res) => {
     JOB_SELECT +
     (where.length ? ` WHERE ${where.join(' AND ')}` : '') +
     ' ORDER BY j.scheduled_date, COALESCE(j.sequence, 999), j.id';
-  res.json(db.prepare(sql).all(...params));
+  res.json(await db.query(sql, params));
 });
 
-jobsRouter.get('/jobs/:id', (req, res) => {
-  const job = db.prepare(JOB_SELECT + ' WHERE j.id = ?').get(Number(req.params.id));
+jobsRouter.get('/jobs/:id', async (req, res) => {
+  const db = await getDb();
+  const id = Number(req.params.id);
+  const job = await db.get(JOB_SELECT + ' WHERE j.id = ?', [id]);
   if (!job) return res.status(404).json({ error: 'not found' });
-  const notes = db
-    .prepare(
-      `SELECT * FROM notes WHERE job_id = ? ORDER BY COALESCE(entry_date, created_at) DESC, id DESC`,
-    )
-    .all(Number(req.params.id));
-  const timeLogs = db
-    .prepare(
-      `SELECT tl.*, e.initials AS employee_initials FROM time_logs tl
-       LEFT JOIN employees e ON e.id = tl.employee_id
-       WHERE tl.job_id = ? ORDER BY tl.created_at DESC`,
-    )
-    .all(Number(req.params.id));
+  const notes = await db.query(
+    `SELECT * FROM notes WHERE job_id = ? ORDER BY COALESCE(entry_date, created_at) DESC, id DESC`,
+    [id],
+  );
+  const timeLogs = await db.query(
+    `SELECT tl.*, e.initials AS employee_initials FROM time_logs tl
+     LEFT JOIN employees e ON e.id = tl.employee_id
+     WHERE tl.job_id = ? ORDER BY tl.created_at DESC`,
+    [id],
+  );
   res.json({ job, notes, timeLogs });
 });
 
-jobsRouter.post('/jobs', (req, res) => {
+jobsRouter.post('/jobs', async (req, res) => {
+  const db = await getDb();
   const b = req.body;
   if (!b.project_id) return res.status(400).json({ error: 'project_id required' });
   const scope = b.scope_code
-    ? (db.prepare('SELECT default_minutes FROM scopes WHERE code = ?').get(b.scope_code) as any)
+    ? ((await db.get('SELECT default_minutes FROM scopes WHERE code = ?', [b.scope_code])) as any)
     : null;
-  const r = db
-    .prepare(
-      `INSERT INTO jobs (project_id, employee_id, unit, scope_code, scope_raw, job_type, status,
-        scheduled_date, measure_date, install_date, est_minutes, priority, time_window_start, time_window_end)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    )
-    .run(
+  const created = (await db.get(
+    `INSERT INTO jobs (project_id, employee_id, unit, scope_code, scope_raw, job_type, status,
+      scheduled_date, measure_date, install_date, est_minutes, priority, time_window_start, time_window_end)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id`,
+    [
       b.project_id,
       b.employee_id ?? null,
       b.unit ?? '',
@@ -98,14 +98,16 @@ jobsRouter.post('/jobs', (req, res) => {
       b.priority ?? 0,
       b.time_window_start ?? null,
       b.time_window_end ?? null,
-    );
-  res.json(db.prepare(JOB_SELECT + ' WHERE j.id = ?').get(Number(r.lastInsertRowid)));
+    ],
+  )) as any;
+  res.json(await db.get(JOB_SELECT + ' WHERE j.id = ?', [created.id]));
 });
 
 // Assign / reschedule / edit a job
-jobsRouter.patch('/jobs/:id', (req, res) => {
+jobsRouter.patch('/jobs/:id', async (req, res) => {
+  const db = await getDb();
   const id = Number(req.params.id);
-  const existing = db.prepare('SELECT * FROM jobs WHERE id = ?').get(id) as any;
+  const existing = (await db.get('SELECT * FROM jobs WHERE id = ?', [id])) as any;
   if (!existing) return res.status(404).json({ error: 'not found' });
   const allowed = [
     'employee_id',
@@ -131,56 +133,56 @@ jobsRouter.patch('/jobs/:id', (req, res) => {
       vals.push(req.body[f]);
     }
   }
-  // auto status transitions on (re)assignment unless explicitly set
   if (!('status' in req.body)) {
     const emp = 'employee_id' in req.body ? req.body.employee_id : existing.employee_id;
     const sched = 'scheduled_date' in req.body ? req.body.scheduled_date : existing.scheduled_date;
     if (existing.status !== 'completed' && existing.status !== 'in_progress') {
-      const newStatus = emp && sched ? 'scheduled' : 'unscheduled';
       sets.push('status = ?');
-      vals.push(newStatus);
+      vals.push(emp && sched ? 'scheduled' : 'unscheduled');
     }
   }
-  sets.push("updated_at = datetime('now')");
+  sets.push('updated_at = ?');
+  vals.push(new Date().toISOString());
   vals.push(id);
-  db.prepare(`UPDATE jobs SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
-  res.json(db.prepare(JOB_SELECT + ' WHERE j.id = ?').get(id));
+  await db.run(`UPDATE jobs SET ${sets.join(', ')} WHERE id = ?`, vals);
+  res.json(await db.get(JOB_SELECT + ' WHERE j.id = ?', [id]));
 });
 
-jobsRouter.delete('/jobs/:id', (req, res) => {
-  db.prepare('DELETE FROM jobs WHERE id = ?').run(Number(req.params.id));
+jobsRouter.delete('/jobs/:id', async (req, res) => {
+  const db = await getDb();
+  await db.run('DELETE FROM jobs WHERE id = ?', [Number(req.params.id)]);
   res.json({ ok: true });
 });
 
 // ---- Notes (paper trail) ----
-jobsRouter.post('/jobs/:id/notes', (req, res) => {
+jobsRouter.post('/jobs/:id/notes', async (req, res) => {
+  const db = await getDb();
   const id = Number(req.params.id);
-  const job = db.prepare('SELECT project_id FROM jobs WHERE id = ?').get(id) as any;
+  const job = (await db.get('SELECT project_id FROM jobs WHERE id = ?', [id])) as any;
   if (!job) return res.status(404).json({ error: 'not found' });
   const { body, source, author } = req.body;
   if (!body) return res.status(400).json({ error: 'body required' });
-  const r = db
-    .prepare(
-      `INSERT INTO notes (job_id, project_id, author, source, body, entry_date)
-       VALUES (?,?,?,?,?,date('now'))`,
-    )
-    .run(id, job.project_id, author ?? (source === 'office' ? 'Coordinator' : 'Field'), source ?? 'field', body);
-  res.json(db.prepare('SELECT * FROM notes WHERE id = ?').get(Number(r.lastInsertRowid)));
+  const today = new Date().toISOString().slice(0, 10);
+  const row = await db.get(
+    `INSERT INTO notes (job_id, project_id, author, source, body, entry_date)
+     VALUES (?,?,?,?,?,?) RETURNING *`,
+    [id, job.project_id, author ?? (source === 'office' ? 'Coordinator' : 'Field'), source ?? 'field', body, today],
+  );
+  res.json(row);
 });
 
 // ---- Time logs (actual hours + completion) ----
-jobsRouter.post('/jobs/:id/timelogs', (req, res) => {
+jobsRouter.post('/jobs/:id/timelogs', async (req, res) => {
+  const db = await getDb();
   const id = Number(req.params.id);
-  const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(id) as any;
+  const job = (await db.get('SELECT * FROM jobs WHERE id = ?', [id])) as any;
   if (!job) return res.status(404).json({ error: 'not found' });
   const { arrived_at, departed_at, completion_status, note, employee_id } = req.body;
   const actual = minutesBetween(arrived_at, departed_at);
-  const r = db
-    .prepare(
-      `INSERT INTO time_logs (job_id, employee_id, arrived_at, departed_at, actual_minutes, completion_status, note)
-       VALUES (?,?,?,?,?,?,?)`,
-    )
-    .run(
+  const row = await db.get(
+    `INSERT INTO time_logs (job_id, employee_id, arrived_at, departed_at, actual_minutes, completion_status, note)
+     VALUES (?,?,?,?,?,?,?) RETURNING *`,
+    [
       id,
       employee_id ?? job.employee_id ?? null,
       arrived_at ?? null,
@@ -188,7 +190,8 @@ jobsRouter.post('/jobs/:id/timelogs', (req, res) => {
       actual,
       completion_status ?? 'complete',
       note ?? null,
-    );
+    ],
+  );
 
   // reflect completion on the job
   let newStatus = job.status;
@@ -196,17 +199,17 @@ jobsRouter.post('/jobs/:id/timelogs', (req, res) => {
   else if (completion_status === 'partial') newStatus = 'in_progress';
   else if (completion_status === 'blocked') newStatus = 'blocked';
   else if (arrived_at && !departed_at) newStatus = 'in_progress';
-  db.prepare("UPDATE jobs SET status = ?, updated_at = datetime('now') WHERE id = ?").run(newStatus, id);
+  await db.run('UPDATE jobs SET status = ?, updated_at = ? WHERE id = ?', [newStatus, new Date().toISOString(), id]);
 
-  // a completion note becomes part of the paper trail too
   if (note) {
-    db.prepare(
+    await db.run(
       `INSERT INTO notes (job_id, project_id, author, source, body, entry_date)
-       VALUES (?,?,?,?,?,date('now'))`,
-    ).run(id, job.project_id, 'Field', 'field', `[${completion_status ?? 'update'}] ${note}`);
+       VALUES (?,?,?,?,?,?)`,
+      [id, job.project_id, 'Field', 'field', `[${completion_status ?? 'update'}] ${note}`, new Date().toISOString().slice(0, 10)],
+    );
   }
 
-  res.json(db.prepare('SELECT * FROM time_logs WHERE id = ?').get(Number(r.lastInsertRowid)));
+  res.json(row);
 });
 
 function minutesBetween(a?: string, b?: string): number | null {
