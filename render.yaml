@@ -13,6 +13,8 @@ services:
     envVars:
       - key: DATABASE_URL
         sync: false # paste your Supabase connection string in the dashboard
+      - key: DB_SCHEMA
+        value: field_scheduler
       - key: GOOGLE_MAPS_API_KEY
         sync: false # optional — live traffic-aware drive times
       - key: NODE_VERSION

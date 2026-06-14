@@ -72,6 +72,10 @@ function toPg(sql: string): string {
   return sql.replace(/\?/g, () => `$${++i}`);
 }
 
+/** Postgres schema this app lives in. Lets the app share a Postgres project
+ *  with other apps without colliding — set DB_SCHEMA (default "public"). */
+export const pgSchema = (process.env.DB_SCHEMA || 'public').replace(/[^a-zA-Z0-9_]/g, '') || 'public';
+
 async function makePg(): Promise<Db> {
   const pg = await import('pg');
   const { Pool, types } = pg.default ?? pg;
@@ -82,6 +86,10 @@ async function makePg(): Promise<Db> {
     connectionString: url,
     max: Number(process.env.PG_POOL_MAX) || 4,
     ssl: /localhost|127\.0\.0\.1/.test(url) ? undefined : { rejectUnauthorized: false },
+  });
+  // every connection resolves unqualified table names to our schema
+  pool.on('connect', (c) => {
+    c.query(`SET search_path TO ${pgSchema}, public`);
   });
 
   const querier = (exec: (sql: string, params: any[]) => Promise<{ rows: any[] }>): Querier => ({
@@ -138,6 +146,11 @@ export async function initSchema(): Promise<void> {
       : 'INTEGER PRIMARY KEY AUTOINCREMENT';
   // timestamp default stored as TEXT so the two engines behave identically
   const ts = dialect === 'pg' ? "TEXT NOT NULL DEFAULT (now()::text)" : 'TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP';
+
+  // when on Postgres, isolate this app in its own schema
+  if (dialect === 'pg') {
+    await db.run(`CREATE SCHEMA IF NOT EXISTS ${pgSchema}`);
+  }
 
   const stmts = [
     `CREATE TABLE IF NOT EXISTS employees (

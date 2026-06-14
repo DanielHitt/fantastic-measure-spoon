@@ -3,43 +3,32 @@
 Locally the app uses a zero-config SQLite file. To host it online — reachable
 from any office computer and your drivers' phones — you need a **cloud database**,
 because free hosts don't keep a permanent file on disk. The app already supports
-Postgres: just set a `DATABASE_URL` and it switches engines automatically.
+Postgres: set `DATABASE_URL` (+ `DB_SCHEMA`) and it switches engines automatically.
 
-Total cost: **$0** at your scale. You'll create two free accounts (a database and
-a host) and paste one connection string between them.
+Total cost: **$0** at your scale.
 
 ---
 
-## Step 1 — Create a free database (Supabase)
+## Step 1 — Database: ALREADY DONE ✅
 
-1. Go to **https://supabase.com** → sign up (free) → **New project**.
-2. Pick a name and a strong **database password** (save it). Choose the region
-   closest to you. Wait ~2 minutes for it to finish setting up.
-3. In the project, click **Connect** (top bar) → **Connection string** →
-   **URI**, and copy it. It looks like:
+Your Supabase database is already set up and populated. It lives in an isolated
+schema called **`field_scheduler`** inside your Supabase project
+(`ltzuxekugvskifnzznei`), kept completely separate from your other apps. It
+contains your 7 techs, the 23-product catalog (with real on-site time estimates),
+and your 80 job sites. The schedule starts empty so you add real work.
+
+You only need your project's **connection string** for Step 2:
+
+1. Open your project at **https://supabase.com/dashboard** → click **Connect**
+   (top bar) → **Connection string** → **URI**.
+2. Copy the **"Transaction" / pooler** URI (port `6543`). It looks like:
    ```
-   postgresql://postgres.abcdxyz:[YOUR-PASSWORD]@aws-0-us-west-1.pooler.supabase.com:6543/postgres
+   postgresql://postgres.ltzuxekugvskifnzznei:[YOUR-PASSWORD]@aws-0-...pooler.supabase.com:6543/postgres
    ```
-   Replace `[YOUR-PASSWORD]` with the password from step 2.
-   > Use the **"Transaction" / pooler** string (port 6543) — it's built for hosting.
+   Replace `[YOUR-PASSWORD]` with your Supabase database password.
 
-### Load the starter data into Supabase (one time)
-
-On your own computer, in the project folder, run the seed once pointed at Supabase:
-
-**Windows (PowerShell):**
-```powershell
-$env:DATABASE_URL="paste-your-supabase-uri-here"
-npm run seed
-```
-**Mac/Linux:**
-```bash
-DATABASE_URL="paste-your-supabase-uri-here" npm run seed
-```
-
-You should see `Seed complete: { employees: 7, projects: 80, jobs: 764, ... }`.
-Your cloud database is now populated. (You can also skip this and start empty —
-just add your own contractors and job sites in the app.)
+> Do **not** run `npm run seed` against this database — that command resets data
+> to the local demo set. Your production data is already loaded.
 
 ---
 
@@ -55,6 +44,7 @@ Render runs the whole app (API + website) as one free service.
    the included `render.yaml` automatically.
 4. When prompted for environment variables, set:
    - **DATABASE_URL** → your Supabase URI from Step 1
+   - **DB_SCHEMA** → `field_scheduler`
    - **GOOGLE_MAPS_API_KEY** → leave blank (optional; add later for live traffic)
 5. Click **Apply / Create**. First build takes a few minutes. When it's done you
    get a URL like `https://dee-field-scheduler.onrender.com` — that's your live app.
@@ -72,6 +62,7 @@ static front end + a serverless API (config is included: `vercel.json` + `api/`)
    `fantastic-measure-spoon` repo.
 2. Under **Settings → Environment Variables**, add:
    - **DATABASE_URL** → your Supabase URI
+   - **DB_SCHEMA** → `field_scheduler`
    - **GOOGLE_MAPS_API_KEY** → optional
 3. Deploy. Vercel uses the included `vercel.json` (build command, static output,
    and `/api` function) automatically.
