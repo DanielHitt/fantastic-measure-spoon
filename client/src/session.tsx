@@ -12,13 +12,14 @@ interface Session {
   provider: string;
   setRole: (r: Role) => void;
   setEmployeeId: (id: number | null) => void;
+  reloadEmployees: () => void;
   currentEmployee?: Employee;
 }
 
 const Ctx = createContext<Session | null>(null);
 
 export function SessionProvider({ children }: { children: ReactNode }) {
-  const { data: employees } = useAsync(() => api.employees(), []);
+  const { data: employees, reload: reloadEmployees } = useAsync(() => api.employees(), []);
   const { data: scopes } = useAsync(() => api.scopes(), []);
   const { data: health } = useAsync(() => api.health(), []);
   const [role, setRole] = useState<Role>(() => (localStorage.getItem('role') as Role) || 'coordinator');
@@ -48,9 +49,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       provider: health?.travelTimeProvider ?? 'heuristic',
       setRole,
       setEmployeeId,
+      reloadEmployees,
       currentEmployee: employees?.find((e) => e.id === employeeId),
     }),
-    [role, employeeId, employees, scopes, health],
+    [role, employeeId, employees, scopes, health, reloadEmployees],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

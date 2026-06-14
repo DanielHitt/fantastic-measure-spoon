@@ -10,6 +10,8 @@ It was designed directly from a real operation's historical data — a year of w
 
 ### For the coordinator (office)
 - **Weekly board** — technicians × weekdays, every job as a card. See stops, estimated hours per tech per day, and completion state at a glance.
+- **Add contractors** — the **Team** tab manages field techs/installers: name, role, badge color, workday hours, and a home/start address used as the routing origin. Removing someone keeps their history intact.
+- **Add job sites** — the **Projects** tab (and a "+ New site" shortcut inside Add Job) creates a project with builder, address (auto-geocoded for the map/routing), and site contact.
 - **Schedule jobs** — add a job, pick the project/builder, building/lot/unit, scope/product (auto-fills the estimated on-site minutes), assign a tech and date, optionally set an arrival time window and priority.
 - **Backlog** — unscheduled jobs sit in a side panel; assign them to a tech/day in two clicks.
 - **Route optimization** — for any tech-day, compute the most efficient stop order ("⚡ Optimize"). Drive times are **traffic- and time-of-day-aware**; the engine shows arrival/departure ETAs per stop, total drive vs. on-site time, miles, projected finish time, and warns when a day runs long or an arrival misses a time window. Save the optimized order back to the schedule.

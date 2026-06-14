@@ -1,12 +1,15 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api, useAsync } from '../api';
 import { fmtDate } from '../lib';
-import { Spinner } from '../components/ui';
+import { AddProjectModal } from '../components/AddProjectModal';
+import { Button, Spinner } from '../components/ui';
 
 export function Projects() {
-  const { data, loading } = useAsync(() => api.projects(), []);
+  const { data, loading, reload } = useAsync(() => api.projects(), []);
   const [q, setQ] = useState('');
+  const [adding, setAdding] = useState(false);
+  const navigate = useNavigate();
 
   const filtered = useMemo(() => {
     const s = q.toLowerCase();
@@ -26,6 +29,7 @@ export function Projects() {
           placeholder="Search by project or city…"
           className="ml-auto w-full max-w-xs rounded-lg border border-slate-300 px-3 py-2 text-sm"
         />
+        <Button onClick={() => setAdding(true)}>+ Add job site</Button>
       </div>
 
       {loading ? (
@@ -60,6 +64,17 @@ export function Projects() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {adding && (
+        <AddProjectModal
+          open
+          onClose={() => setAdding(false)}
+          onCreated={(p) => {
+            reload();
+            navigate(`/projects/${p.id}`);
+          }}
+        />
       )}
     </div>
   );

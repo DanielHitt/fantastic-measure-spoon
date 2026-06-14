@@ -4,6 +4,7 @@ import { Dashboard } from './pages/Dashboard';
 import { DriverDay } from './pages/DriverDay';
 import { Projects } from './pages/Projects';
 import { ProjectDetail } from './pages/ProjectDetail';
+import { Team } from './pages/Team';
 
 export default function App() {
   return (
@@ -16,6 +17,7 @@ export default function App() {
             <Route path="/my-day" element={<DriverDay />} />
             <Route path="/projects" element={<Projects />} />
             <Route path="/projects/:id" element={<ProjectDetail />} />
+            <Route path="/team" element={<Team />} />
           </Routes>
         </main>
       </div>
@@ -42,6 +44,7 @@ function TopBar() {
           <NavTab to="/" label="Schedule" />
           <NavTab to="/my-day" label="My Day" />
           <NavTab to="/projects" label="Projects" />
+          <NavTab to="/team" label="Team" />
         </nav>
 
         <div className="ml-auto flex items-center gap-2">

@@ -9,6 +9,7 @@ export interface Employee {
   home_lng?: number;
   work_start: string;
   work_end: string;
+  active?: number;
 }
 
 export interface Scope {

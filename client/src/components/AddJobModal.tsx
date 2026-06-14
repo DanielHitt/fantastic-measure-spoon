@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { api, useAsync } from '../api';
 import type { Employee, Scope } from '../types';
+import { AddProjectModal } from './AddProjectModal';
 import { Button, Field, Modal, inputCls } from './ui';
 
 export function AddJobModal({
@@ -20,9 +21,10 @@ export function AddJobModal({
   defaultDate?: string;
   defaultEmployeeId?: number | null;
 }) {
-  const { data: projects } = useAsync(() => api.projects(), []);
+  const { data: projects, reload: reloadProjects } = useAsync(() => api.projects(), []);
   const [projectId, setProjectId] = useState<number | ''>('');
   const [search, setSearch] = useState('');
+  const [addingProject, setAddingProject] = useState(false);
   const [unit, setUnit] = useState('');
   const [scopeCode, setScopeCode] = useState('');
   const [estMinutes, setEstMinutes] = useState<number | ''>('');
@@ -78,14 +80,21 @@ export function AddJobModal({
     <Modal open={open} onClose={onClose} title="Add a job" wide>
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="sm:col-span-2">
-          <Field label="Project / builder">
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search projects…"
-              className={inputCls}
-            />
-          </Field>
+          <div className="flex items-end gap-2">
+            <div className="flex-1">
+              <Field label="Project / builder">
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search projects…"
+                  className={inputCls}
+                />
+              </Field>
+            </div>
+            <Button variant="secondary" onClick={() => setAddingProject(true)}>
+              + New site
+            </Button>
+          </div>
           <div className="mt-1 max-h-40 overflow-y-auto rounded-lg border border-slate-200">
             {filtered.map((p) => (
               <button
@@ -167,6 +176,18 @@ export function AddJobModal({
           Create job
         </Button>
       </div>
+
+      {addingProject && (
+        <AddProjectModal
+          open
+          onClose={() => setAddingProject(false)}
+          onCreated={(p) => {
+            reloadProjects();
+            setProjectId(p.id);
+            setSearch(p.name);
+          }}
+        />
+      )}
     </Modal>
   );
 }

@@ -27,6 +27,10 @@ async function http<T>(path: string, opts?: RequestInit): Promise<T> {
 export const api = {
   health: () => http<{ ok: boolean; travelTimeProvider: string }>('/health'),
   employees: () => http<Employee[]>('/employees'),
+  createEmployee: (body: Partial<Employee> & { name: string }) =>
+    http<Employee>('/employees', { method: 'POST', body: JSON.stringify(body) }),
+  updateEmployee: (id: number, patch: Partial<Employee>) =>
+    http<Employee>(`/employees/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   scopes: () => http<Scope[]>('/scopes'),
   projects: () => http<Project[]>('/projects'),
   project: (id: number) =>
